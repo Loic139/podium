@@ -1,0 +1,376 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Utilisateurs & clubs
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MONITEUR
+  JUGE
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  firstName    String
+  lastName     String
+  passwordHash String?
+  role         Role
+  active       Boolean   @default(true)
+
+  // Invitation par email : tant que passwordHash est null, le compte est "invité"
+  invitationToken     String?   @unique
+  invitationExpiresAt DateTime?
+
+  // Un moniteur gère un seul club
+  clubId String?
+  club   Club?   @relation(fields: [clubId], references: [id])
+
+  judgeAssignments JudgeAssignment[]
+  scores           Score[]
+  registrations    Registration[]    @relation("RegistrationCreatedBy")
+  validations      ResultPublication[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+}
+
+model Club {
+  id   String @id @default(cuid())
+  name String @unique
+  // Identifiant externe pour synchronisation future avec une base existante
+  externalId String? @unique
+
+  moniteurs User[]
+  gymnasts  Gymnast[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Gymnast {
+  id        String  @id @default(cuid())
+  firstName String
+  lastName  String
+  birthYear Int?
+  // Identifiant externe pour synchronisation future avec une base existante
+  externalId String? @unique
+
+  clubId String
+  club   Club   @relation(fields: [clubId], references: [id])
+
+  registrations Registration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+}
+
+// ─────────────────────────────────────────────
+// Référentiels configurables
+// ─────────────────────────────────────────────
+
+model Category {
+  id     String  @id @default(cuid())
+  code   String  @unique // C1..C7, CH, CD — données de base, pas codées en dur
+  name   String
+  order  Int     @default(0)
+  active Boolean @default(true)
+
+  competitionCategories CompetitionCategory[]
+  registrations         Registration[]
+}
+
+model Apparatus {
+  id     String  @id @default(cuid())
+  code   String  @unique // FLOOR, RINGS, VAULT, HIGH_BAR, PARALLEL_BARS…
+  name   String
+  order  Int     @default(0)
+  active Boolean @default(true)
+  // Saut : deux passages — deux vidéos obligatoires, deux notes par juge,
+  // note finale = moyenne des deux passages
+  twoAttempts Boolean @default(false)
+
+  competitionApparatus CompetitionApparatus[]
+  judgeAssignments     JudgeAssignment[]
+  deductionTypes       DeductionTypeApparatus[]
+}
+
+// ─────────────────────────────────────────────
+// Compétitions
+// ─────────────────────────────────────────────
+
+enum ScoringMethod {
+  AVERAGE          // moyenne des notes
+  TRIMMED_AVERAGE  // suppression meilleure + moins bonne, puis moyenne
+}
+
+enum CompetitionStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model Competition {
+  id          String            @id @default(cuid())
+  name        String
+  year        Int
+  description String?           @db.Text
+  status      CompetitionStatus @default(DRAFT)
+
+  scoringMethod ScoringMethod @default(AVERAGE)
+  // Nombre de juges prévus par engin (indicatif, la config réelle = assignations)
+  judgesPerApparatus Int @default(1)
+
+  categories CompetitionCategory[]
+  apparatus  CompetitionApparatus[]
+  rounds     CompetitionRound[]
+  registrations Registration[]
+  judgeAssignments JudgeAssignment[]
+  publications  ResultPublication[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([year])
+}
+
+model CompetitionCategory {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  categoryId    String
+  category      Category    @relation(fields: [categoryId], references: [id])
+
+  registrations Registration[]
+
+  @@unique([competitionId, categoryId])
+}
+
+// Une "semaine" (tour) : fenêtre d'upload, fenêtre de jugement, heure de publication
+model CompetitionRound {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  number        Int // semaine 1, 2, …
+
+  uploadStart   DateTime // début de la fenêtre d'envoi des vidéos
+  uploadEnd     DateTime // deadline vidéo (après : note 0 si rien soumis)
+  judgingEnd    DateTime // fin de la fenêtre de jugement
+  publicationAt DateTime // ex. dimanche 18h
+
+  // Publication : résultats visibles si validatedAt != null ET now >= publicationAt
+  validatedAt DateTime?
+
+  apparatus    CompetitionApparatus[]
+  publications ResultPublication[]
+
+  @@unique([competitionId, number])
+}
+
+// Engin activé dans une compétition, avec son ordre et sa semaine
+model CompetitionApparatus {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  apparatusId   String
+  apparatus     Apparatus   @relation(fields: [apparatusId], references: [id])
+  order         Int         @default(0)
+
+  roundId String?
+  round   CompetitionRound? @relation(fields: [roundId], references: [id])
+
+  performances Performance[]
+
+  @@unique([competitionId, apparatusId])
+  @@index([roundId])
+}
+
+// ─────────────────────────────────────────────
+// Inscriptions & prestations
+// ─────────────────────────────────────────────
+
+model Registration {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  gymnastId     String
+  gymnast       Gymnast     @relation(fields: [gymnastId], references: [id])
+
+  // Catégorie choisie par le moniteur pour CETTE compétition
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  competitionCategoryId String?
+  competitionCategory   CompetitionCategory? @relation(fields: [competitionCategoryId], references: [id])
+
+  createdById String?
+  createdBy   User?   @relation("RegistrationCreatedBy", fields: [createdById], references: [id])
+
+  performances Performance[]
+
+  createdAt DateTime @default(now())
+
+  // Un gymnaste ne participe qu'une seule fois à une même compétition
+  @@unique([competitionId, gymnastId])
+  @@index([categoryId])
+}
+
+enum PerformanceStatus {
+  MISSING   // aucun lien soumis
+  SUBMITTED // lien soumis, pas encore jugé
+  JUDGING   // au moins une note saisie, jugement incomplet
+  JUDGED    // toutes les notes attendues saisies
+}
+
+model Performance {
+  id             String       @id @default(cuid())
+  registrationId String
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  competitionApparatusId String
+  competitionApparatus   CompetitionApparatus @relation(fields: [competitionApparatusId], references: [id], onDelete: Cascade)
+
+  // Liens YouTube non répertoriés. Pour un engin à deux passages (saut),
+  // videoUrl = saut 1 et videoUrl2 = saut 2, tous deux obligatoires.
+  videoUrl    String?
+  videoUrl2   String?
+  submittedAt DateTime?
+
+  status PerformanceStatus @default(MISSING)
+
+  scores Score[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Une prestation = une vidéo par engin et par gymnaste
+  @@unique([registrationId, competitionApparatusId])
+}
+
+// ─────────────────────────────────────────────
+// Jugement
+// ─────────────────────────────────────────────
+
+model JudgeAssignment {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  judgeId       String
+  judge         User        @relation(fields: [judgeId], references: [id])
+  apparatusId   String
+  apparatus     Apparatus   @relation(fields: [apparatusId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([competitionId, judgeId, apparatusId])
+  @@index([judgeId])
+}
+
+enum ScoreEntryMode {
+  DIRECT     // note saisie directement
+  DEDUCTIONS // note calculée : 10 - somme des déductions
+}
+
+model Score {
+  id            String      @id @default(cuid())
+  performanceId String
+  performance   Performance @relation(fields: [performanceId], references: [id], onDelete: Cascade)
+  judgeId       String
+  judge         User        @relation(fields: [judgeId], references: [id])
+
+  // Passage noté : 1 par défaut, 2 pour le second saut (engin à deux passages)
+  attempt Int @default(1)
+
+  // Note sur 10, précision au dixième pour la saisie (la moyenne peut avoir 2 décimales)
+  value     Decimal        @db.Decimal(4, 2)
+  entryMode ScoreEntryMode @default(DEDUCTIONS)
+
+  // Commentaire interne du juge — jamais affiché publiquement
+  comment String? @db.Text
+
+  deductions ScoreDeduction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([performanceId, judgeId, attempt])
+  @@index([judgeId])
+}
+
+// ─────────────────────────────────────────────
+// Déductions (globales, gérées par l'admin)
+// ─────────────────────────────────────────────
+
+model DeductionType {
+  id     String  @id @default(cuid())
+  name   String
+  // Valeur en dixièmes positifs (0.5 = -0.5 sur la note). Pas de 0.05.
+  value    Decimal  @db.Decimal(3, 1)
+  // Si maxValue défini : déduction à fourchette (ex. jambes fléchies 0.1 à 0.3)
+  maxValue Decimal? @db.Decimal(3, 1)
+  active   Boolean  @default(true)
+
+  // Engins applicables. Aucun lien = applicable à tous les engins.
+  apparatus DeductionTypeApparatus[]
+  scoreDeductions ScoreDeduction[]
+
+  createdAt DateTime @default(now())
+}
+
+model DeductionTypeApparatus {
+  deductionTypeId String
+  deductionType   DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Cascade)
+  apparatusId     String
+  apparatus       Apparatus     @relation(fields: [apparatusId], references: [id], onDelete: Cascade)
+
+  @@id([deductionTypeId, apparatusId])
+}
+
+model ScoreDeduction {
+  id      String @id @default(cuid())
+  scoreId String
+  score   Score  @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+
+  // Null si déduction "libre" (raccourci clavier 1/2/3 sans type)
+  deductionTypeId String?
+  deductionType   DeductionType? @relation(fields: [deductionTypeId], references: [id])
+
+  // Valeur appliquée (positive, retirée de 10)
+  value Decimal @db.Decimal(3, 1)
+  // Ordre de saisie — permet "annuler la dernière déduction"
+  order Int
+
+  createdAt DateTime @default(now())
+
+  @@index([scoreId])
+}
+
+// ─────────────────────────────────────────────
+// Publication des résultats (audit)
+// ─────────────────────────────────────────────
+
+model ResultPublication {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  roundId       String?
+  round         CompetitionRound? @relation(fields: [roundId], references: [id])
+
+  validatedById String
+  validatedBy   User   @relation(fields: [validatedById], references: [id])
+  validatedAt   DateTime @default(now())
+
+  @@index([competitionId])
+}
