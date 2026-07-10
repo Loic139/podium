@@ -17,6 +17,11 @@ export const metadata: Metadata = {
   description: "Plateforme de compétitions de gymnastique vidéo en ligne",
 };
 
+// Toute l'app est rendue à la requête (résultats en direct, sessions).
+// Sans ceci, le build tente de pré-rendre les pages et interroge la base —
+// qui n'est pas accessible au moment du build sur l'hébergement.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{
