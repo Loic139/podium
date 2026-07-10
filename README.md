@@ -22,7 +22,10 @@ npx prisma db seed       # données de démonstration
 npm run dev
 ```
 
-### Comptes de démonstration (mot de passe : `demo1234`)
+### Comptes de démonstration
+
+Le mot de passe commun est défini par la variable `SEED_PASSWORD` (fichier
+`.env`) ; sans elle, le seed en génère un aléatoire et l'affiche en console.
 
 | Email | Rôle |
 |---|---|

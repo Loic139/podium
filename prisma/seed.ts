@@ -1,7 +1,12 @@
+import { randomBytes } from "crypto";
 import { PrismaClient, Role, PerformanceStatus, ScoreEntryMode } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
+
+// Mot de passe des comptes de démo : via SEED_PASSWORD (.env), sinon généré
+// aléatoirement et affiché en fin de seed. Jamais en dur dans le dépôt.
+const seedPassword = process.env.SEED_PASSWORD ?? randomBytes(9).toString("base64url");
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.now();
@@ -78,7 +83,7 @@ async function main() {
   }
 
   // ── Utilisateurs ────────────────────────────────────
-  const hash = await bcrypt.hash("demo1234", 10);
+  const hash = await bcrypt.hash(seedPassword, 10);
   const mkUser = (
     email: string,
     firstName: string,
@@ -392,7 +397,7 @@ async function main() {
   }
 
   console.log("Seed terminé.");
-  console.log("Comptes de démo (mot de passe : demo1234) :");
+  console.log(`Comptes de démo (mot de passe : ${seedPassword}) :`);
   console.log("  admin@ffg.ch (Admin)");
   console.log("  moniteur1@ffg.ch, moniteur2@ffg.ch, moniteur3@ffg.ch (Moniteurs)");
   console.log("  juge1@ffg.ch, juge2@ffg.ch, juge3@ffg.ch (Juges)");
