@@ -17,7 +17,7 @@
  * Relançable sans risque : les enregistrements existants ne sont pas modifiés.
  */
 import { readFileSync } from "fs";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Gender } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -82,6 +82,15 @@ function parseBirthYear(raw: string): number | null {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Sexe déduit du code concours : AF/AAF = Agrès filles, AG/AAG = Agrès
+ *  garçons. Autres concours (TG, ATHL, WGY…) : indéterminé → null. */
+function genderFromConcours(idConcours: string): Gender | null {
+  const code = idConcours.trim().toUpperCase();
+  if (code === "AF" || code === "AAF") return Gender.F;
+  if (code === "AG" || code === "AAG") return Gender.M;
+  return null;
+}
+
 // ── Import ────────────────────────────────────────────
 
 async function main() {
@@ -101,6 +110,10 @@ async function main() {
     gymnasts: 0,
     gymnastsSkipped: 0,
     birthYearInvalid: 0,
+    genderM: 0,
+    genderF: 0,
+    genderUnknown: 0,
+    genderBackfilled: 0,
     moniteurs: 0,
     moniteursSkipped: 0,
     existing: 0,
@@ -140,15 +153,24 @@ async function main() {
     seenGymnasts.add(externalId);
     const birthYear = parseBirthYear(r["annee_nais"]);
     if (birthYear === null) stats.birthYearInvalid++;
+    const gender = genderFromConcours(r["id_concours"] ?? "");
+    if (gender === "M") stats.genderM++;
+    else if (gender === "F") stats.genderF++;
+    else stats.genderUnknown++;
 
     if (!dryRun) {
       const existing = await prisma.gymnast.findUnique({ where: { externalId } });
       if (existing) {
+        // Rattrapage : complète le sexe des gymnastes importés avant l'ajout du champ
+        if (existing.gender === null && gender !== null) {
+          await prisma.gymnast.update({ where: { externalId }, data: { gender } });
+          stats.genderBackfilled++;
+        }
         stats.existing++;
         continue;
       }
       await prisma.gymnast.create({
-        data: { externalId, firstName, lastName, birthYear, clubId },
+        data: { externalId, firstName, lastName, birthYear, gender, clubId },
       });
     }
     stats.gymnasts++;
@@ -190,6 +212,10 @@ async function main() {
   console.log(dryRun ? "── Simulation (aucune écriture) ──" : "── Import terminé ──");
   console.log(`Clubs                 : ${stats.clubs}`);
   console.log(`Gymnastes importés    : ${stats.gymnasts} (ignorés : ${stats.gymnastsSkipped}, année de naissance invalide → null : ${stats.birthYearInvalid})`);
+  console.log(`  dont garçons : ${stats.genderM}, filles : ${stats.genderF}, indéterminé : ${stats.genderUnknown}`);
+  if (stats.genderBackfilled > 0) {
+    console.log(`  sexe complété sur gymnastes existants : ${stats.genderBackfilled}`);
+  }
   console.log(`Moniteurs importés    : ${stats.moniteurs} (lignes ignorées/doublons : ${stats.moniteursSkipped})`);
   if (stats.existing > 0) {
     console.log(`Déjà présents (non modifiés) : ${stats.existing}`);

@@ -130,7 +130,7 @@ async function main() {
     gymnasts.push(
       existing ??
         (await prisma.gymnast.create({
-          data: { firstName, lastName, birthYear, clubId },
+          data: { firstName, lastName, birthYear, gender: "M", clubId },
         }))
     );
   }

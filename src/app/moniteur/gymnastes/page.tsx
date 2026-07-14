@@ -22,6 +22,7 @@ export default async function GymnastsPage() {
               <tr>
                 <th>Nom</th>
                 <th>Prénom</th>
+                <th>Sexe</th>
                 <th>Année</th>
                 <th className="text-right">Participations</th>
               </tr>
@@ -31,13 +32,22 @@ export default async function GymnastsPage() {
                 <tr key={g.id}>
                   <td className="font-medium">{g.lastName}</td>
                   <td>{g.firstName}</td>
+                  <td>
+                    {g.gender === "M" ? (
+                      <span className="badge-blue">Garçon</span>
+                    ) : g.gender === "F" ? (
+                      <span className="badge-indigo">Fille</span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="text-slate-500">{g.birthYear ?? "—"}</td>
                   <td className="text-right">{g._count.registrations}</td>
                 </tr>
               ))}
               {gymnasts.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="text-center text-slate-400 py-6">
+                  <td colSpan={5} className="text-center text-slate-400 py-6">
                     Aucun gymnaste. Ajoutez-en un ci-contre.
                   </td>
                 </tr>
@@ -55,6 +65,14 @@ export default async function GymnastsPage() {
             <div>
               <label className="label">Nom</label>
               <input name="lastName" required className="input" />
+            </div>
+            <div>
+              <label className="label">Sexe</label>
+              <select name="gender" className="input" required defaultValue="">
+                <option value="" disabled>Choisir…</option>
+                <option value="M">Garçon</option>
+                <option value="F">Fille</option>
+              </select>
             </div>
             <div>
               <label className="label">Année de naissance</label>

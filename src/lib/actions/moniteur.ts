@@ -15,10 +15,12 @@ export async function createGymnast(formData: FormData) {
   const firstName = String(formData.get("firstName") ?? "").trim();
   const lastName = String(formData.get("lastName") ?? "").trim();
   const birthYear = parseInt(String(formData.get("birthYear"))) || null;
+  const genderRaw = String(formData.get("gender") ?? "");
+  const gender = genderRaw === "M" || genderRaw === "F" ? genderRaw : null;
   if (!firstName || !lastName) return;
 
   await prisma.gymnast.create({
-    data: { firstName, lastName, birthYear, clubId: session.clubId },
+    data: { firstName, lastName, birthYear, gender, clubId: session.clubId },
   });
   revalidatePath("/moniteur/gymnastes");
 }

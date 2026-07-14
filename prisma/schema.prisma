@@ -58,11 +58,18 @@ model Club {
   updatedAt DateTime @updatedAt
 }
 
+enum Gender {
+  M // garçon
+  F // fille
+}
+
 model Gymnast {
   id        String  @id @default(cuid())
   firstName String
   lastName  String
   birthYear Int?
+  // Null si inconnu (anciennes données sans distinction)
+  gender    Gender?
   // Identifiant externe pour synchronisation future avec une base existante
   externalId String? @unique
 
