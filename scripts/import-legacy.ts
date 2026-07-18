@@ -2,11 +2,16 @@
  * Migration des données historiques (exports CSV de l'ancienne application).
  *
  * Usage :
- *   npx tsx scripts/import-legacy.ts <gymnastes.csv> <contacts.csv> [--dry-run]
+ *   npx tsx scripts/import-legacy.ts <gymnastes.csv> <contacts.csv> \
+ *     [--societes <societe.csv>] [--categories <categorie_concours.csv>] [--dry-run]
  *
- * - Clubs : créés depuis les id_soc rencontrés (nom provisoire "Société N",
- *   renommable dans l'admin), rattachés via externalId pour permettre une
- *   resynchronisation future sans doublons.
+ * - Clubs : créés depuis les id_soc rencontrés, rattachés via externalId pour
+ *   permettre une resynchronisation future sans doublons. Avec --societes, les
+ *   vrais noms sont appliqués (un nom déjà personnalisé dans l'admin n'est
+ *   remplacé que s'il est encore un placeholder "Société N").
+ * - Catégories historiques : avec --categories, importées INACTIVES (id_cat
+ *   comme code, libellé + filles/garçons déduit du concours). Les mots de
+ *   passe en clair présents dans societe.csv ne sont jamais importés.
  * - Gymnastes : upsert par externalId (id_gymnaste), nom/prénom séparés,
  *   année de naissance validée (sinon null).
  * - Contacts : dédoublonnés par email → comptes MONITEUR sans mot de passe
@@ -96,9 +101,20 @@ function genderFromConcours(idConcours: string): Gender | null {
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
-  const [gymnastsPath, contactsPath] = args.filter((a) => !a.startsWith("--"));
+  const flagValue = (name: string): string | null => {
+    const i = args.indexOf(name);
+    return i !== -1 && args[i + 1] ? args[i + 1] : null;
+  };
+  const societesPath = flagValue("--societes");
+  const categoriesPath = flagValue("--categories");
+  const positional = args.filter(
+    (a, i) => !a.startsWith("--") && args[i - 1] !== "--societes" && args[i - 1] !== "--categories"
+  );
+  const [gymnastsPath, contactsPath] = positional;
   if (!gymnastsPath || !contactsPath) {
-    console.error("Usage: npx tsx scripts/import-legacy.ts <gymnastes.csv> <contacts.csv> [--dry-run]");
+    console.error(
+      "Usage: npx tsx scripts/import-legacy.ts <gymnastes.csv> <contacts.csv> [--societes <csv>] [--categories <csv>] [--dry-run]"
+    );
     process.exit(1);
   }
 
@@ -117,25 +133,63 @@ async function main() {
     moniteurs: 0,
     moniteursSkipped: 0,
     existing: 0,
+    clubsRenamed: 0,
+    categories: 0,
+    categoriesSkipped: 0,
   };
+
+  // 0. Noms réels des sociétés (societe.csv) : id_soc → nom_soc.
+  // Certains noms sont dupliqués (même club sur plusieurs concours) : les
+  // occurrences suivantes sont suffixées avec l'id pour rester uniques.
+  const clubNameByExternal = new Map<string, string>();
+  if (societesPath) {
+    const usedNames = new Set<string>();
+    for (const r of parseCsv(societesPath)) {
+      const id = r["id_soc"];
+      let name = (r["nom_soc"] ?? "").replace(/^NULL$/, "").trim();
+      if (!id || !name) continue;
+      if (usedNames.has(name)) name = `${name} (${id})`;
+      usedNames.add(name);
+      clubNameByExternal.set(id, name);
+    }
+  }
 
   // 1. Clubs — union des sociétés des deux fichiers
   const socIds = new Set<string>();
   for (const r of gymnastRows) if (r["id_soc"]) socIds.add(r["id_soc"]);
   for (const r of contactRows) if (r["id_soc"]) socIds.add(r["id_soc"]);
 
+  // Les sociétés connues seulement via societe.csv sont aussi créées
+  for (const id of clubNameByExternal.keys()) socIds.add(id);
+
   const clubIdByExternal = new Map<string, string>();
   for (const socId of socIds) {
+    const realName = clubNameByExternal.get(socId);
     if (dryRun) {
       clubIdByExternal.set(socId, `dry-${socId}`);
       stats.clubs++;
+      if (realName) stats.clubsRenamed++;
       continue;
     }
     const club = await prisma.club.upsert({
       where: { externalId: socId },
-      update: {}, // ne pas écraser un nom déjà personnalisé dans l'admin
-      create: { externalId: socId, name: `Société ${socId}` },
+      update: {},
+      create: { externalId: socId, name: realName ?? `Société ${socId}` },
     });
+    // Applique le vrai nom uniquement par-dessus un placeholder — un nom
+    // personnalisé dans l'admin n'est jamais écrasé
+    if (realName && club.name !== realName && /^Société \d+$/.test(club.name)) {
+      try {
+        await prisma.club.update({ where: { id: club.id }, data: { name: realName } });
+      } catch {
+        // Nom déjà pris par un autre club (personnalisé dans l'admin) → suffixe
+        await prisma.club.update({
+          where: { id: club.id },
+          data: { name: `${realName} (${socId})` },
+        });
+      }
+      stats.clubsRenamed++;
+    }
     clubIdByExternal.set(socId, club.id);
     stats.clubs++;
   }
@@ -209,8 +263,40 @@ async function main() {
     stats.moniteurs++;
   }
 
+  // 4. Catégories historiques (categorie_concours.csv) — importées inactives
+  if (categoriesPath) {
+    const baseOrder = dryRun ? 100 : await prisma.category.count();
+    let i = 0;
+    for (const r of parseCsv(categoriesPath)) {
+      const code = r["id_cat"];
+      const label = (r["categorie"] ?? "").trim();
+      if (!code || !label) {
+        stats.categoriesSkipped++;
+        continue;
+      }
+      const gender = genderFromConcours(r["id_concours"] ?? "");
+      const suffix =
+        gender === "F" ? " (filles)" : gender === "M" ? " (garçons)" : ` (${r["id_concours"]})`;
+      if (!dryRun) {
+        const existing = await prisma.category.findUnique({ where: { code } });
+        if (existing) {
+          stats.categoriesSkipped++;
+          continue;
+        }
+        await prisma.category.create({
+          data: { code, name: label + suffix, order: baseOrder + i, active: false },
+        });
+      }
+      stats.categories++;
+      i++;
+    }
+  }
+
   console.log(dryRun ? "── Simulation (aucune écriture) ──" : "── Import terminé ──");
-  console.log(`Clubs                 : ${stats.clubs}`);
+  console.log(`Clubs                 : ${stats.clubs}${stats.clubsRenamed ? ` (noms réels appliqués : ${stats.clubsRenamed})` : ""}`);
+  if (categoriesPath) {
+    console.log(`Catégories historiques : ${stats.categories} importées inactives (ignorées/existantes : ${stats.categoriesSkipped})`);
+  }
   console.log(`Gymnastes importés    : ${stats.gymnasts} (ignorés : ${stats.gymnastsSkipped}, année de naissance invalide → null : ${stats.birthYearInvalid})`);
   console.log(`  dont garçons : ${stats.genderM}, filles : ${stats.genderF}, indéterminé : ${stats.genderUnknown}`);
   if (stats.genderBackfilled > 0) {
@@ -221,9 +307,15 @@ async function main() {
     console.log(`Déjà présents (non modifiés) : ${stats.existing}`);
   }
   console.log("\nRappels :");
-  console.log("· Les clubs s'appellent « Société N » — renommez-les dans l'admin (Clubs).");
+  if (!societesPath) {
+    console.log("· Sans --societes, les clubs s'appellent « Société N » — renommez-les dans l'admin.");
+  }
   console.log("· Les moniteurs importés n'ont PAS de mot de passe : envoyez-leur une");
   console.log("  invitation depuis l'admin (Utilisateurs) quand vous voudrez les activer.");
+  if (categoriesPath) {
+    console.log("· Les catégories historiques sont INACTIVES — activez celles dont vous");
+    console.log("  avez besoin dans l'admin (Catégories).");
+  }
 }
 
 main()
