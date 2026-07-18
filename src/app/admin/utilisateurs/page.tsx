@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { inviteUser, toggleUser } from "@/lib/actions/admin";
+import { inviteUser, toggleUser, generateInvitation } from "@/lib/actions/admin";
+import CopyField from "@/components/CopyField";
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: "Admin",
@@ -60,9 +61,15 @@ export default async function UsersPage() {
                   <td className="text-right">
                     <div className="flex items-center justify-end gap-2">
                       {u.invitationToken && (
-                        <span className="text-xs text-slate-400 max-w-45 truncate font-mono" title={`${appUrl}/invitation/${u.invitationToken}`}>
-                          /invitation/{u.invitationToken.slice(0, 8)}…
-                        </span>
+                        <CopyField value={`${appUrl}/invitation/${u.invitationToken}`} />
+                      )}
+                      {!u.passwordHash && u.active && (
+                        <form action={generateInvitation}>
+                          <input type="hidden" name="id" value={u.id} />
+                          <button className="btn-primary btn-sm">
+                            {u.invitationToken ? "Renouveler" : "Inviter"}
+                          </button>
+                        </form>
                       )}
                       <form action={toggleUser}>
                         <input type="hidden" name="id" value={u.id} />

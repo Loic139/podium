@@ -112,20 +112,49 @@ export async function inviteUser(formData: FormData) {
   if (!email || !firstName || !lastName) return;
 
   const invitationToken = randomBytes(24).toString("hex");
-  await prisma.user.upsert({
-    where: { email },
-    update: {},
-    create: {
-      email,
-      firstName,
-      lastName,
-      role,
-      clubId: role === "MONITEUR" ? clubId : null,
-      invitationToken,
+  const invitationExpiresAt = new Date(Date.now() + 7 * DAY);
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    // Compte déjà présent (ex. moniteur importé) : régénère le lien
+    // d'invitation, sauf si le compte est déjà actif avec mot de passe.
+    if (!existing.passwordHash) {
+      await prisma.user.update({
+        where: { email },
+        data: { invitationToken, invitationExpiresAt },
+      });
+    }
+  } else {
+    await prisma.user.create({
+      data: {
+        email,
+        firstName,
+        lastName,
+        role,
+        clubId: role === "MONITEUR" ? clubId : null,
+        invitationToken,
+        invitationExpiresAt,
+      },
+    });
+  }
+  // MVP : pas d'envoi d'email réel — le lien d'invitation est affiché dans la liste.
+  revalidatePath("/admin/utilisateurs");
+}
+
+/** Génère (ou renouvelle) un lien d'invitation pour un utilisateur existant
+ *  sans mot de passe — typiquement les moniteurs importés. */
+export async function generateInvitation(formData: FormData) {
+  await requireRole("ADMIN");
+  const id = String(formData.get("id"));
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user || user.passwordHash) return; // compte déjà actif : ne rien faire
+
+  await prisma.user.update({
+    where: { id },
+    data: {
+      invitationToken: randomBytes(24).toString("hex"),
       invitationExpiresAt: new Date(Date.now() + 7 * DAY),
     },
   });
-  // MVP : pas d'envoi d'email réel — le lien d'invitation est affiché dans la liste.
   revalidatePath("/admin/utilisateurs");
 }
 
