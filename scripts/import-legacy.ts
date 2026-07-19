@@ -136,6 +136,9 @@ async function main() {
     clubsRenamed: 0,
     categories: 0,
     categoriesSkipped: 0,
+    catAssigned: 0,
+    catUnmatched: 0,
+    catBackfilled: 0,
   };
 
   // 0. Noms réels des sociétés (societe.csv) : id_soc → nom_soc.
@@ -194,7 +197,51 @@ async function main() {
     stats.clubs++;
   }
 
-  // 2. Gymnastes — upsert par externalId
+  // 2. Catégories historiques (categorie_concours.csv) — importées inactives,
+  //    AVANT les gymnastes pour pouvoir leur attribuer leur catégorie
+  if (categoriesPath) {
+    const baseOrder = dryRun ? 100 : await prisma.category.count();
+    let i = 0;
+    for (const r of parseCsv(categoriesPath)) {
+      const code = r["id_cat"];
+      const label = (r["categorie"] ?? "").trim();
+      if (!code || !label) {
+        stats.categoriesSkipped++;
+        continue;
+      }
+      const gender = genderFromConcours(r["id_concours"] ?? "");
+      const suffix =
+        gender === "F" ? " (filles)" : gender === "M" ? " (garçons)" : ` (${r["id_concours"]})`;
+      if (!dryRun) {
+        const existing = await prisma.category.findUnique({ where: { code } });
+        if (existing) {
+          stats.categoriesSkipped++;
+          continue;
+        }
+        await prisma.category.create({
+          data: { code, name: label + suffix, order: baseOrder + i, active: false },
+        });
+      }
+      stats.categories++;
+      i++;
+    }
+  }
+
+  // Correspondance code catégorie (insensible à la casse) → id en base
+  const categoryIdByCode = new Map<string, string>();
+  for (const c of await prisma.category.findMany()) {
+    categoryIdByCode.set(c.code.toUpperCase(), c.id);
+  }
+  if (dryRun && categoriesPath) {
+    // En simulation, les catégories du CSV ne sont pas encore en base
+    for (const r of parseCsv(categoriesPath)) {
+      const code = (r["id_cat"] ?? "").toUpperCase();
+      if (code && !categoryIdByCode.has(code)) categoryIdByCode.set(code, `dry-${code}`);
+    }
+  }
+  const unmatchedCategoryCodes = new Map<string, number>();
+
+  // 3. Gymnastes — upsert par externalId, avec sexe et catégorie
   const seenGymnasts = new Set<string>();
   for (const r of gymnastRows) {
     const externalId = r["id_gymnaste"];
@@ -212,19 +259,32 @@ async function main() {
     else if (gender === "F") stats.genderF++;
     else stats.genderUnknown++;
 
+    // Catégorie du gymnaste depuis id_categorie de l'archive
+    const catCode = (r["id_categorie"] ?? "").trim().toUpperCase();
+    const categoryId = categoryIdByCode.get(catCode) ?? null;
+    if (catCode && categoryId) stats.catAssigned++;
+    else if (catCode) {
+      unmatchedCategoryCodes.set(catCode, (unmatchedCategoryCodes.get(catCode) ?? 0) + 1);
+      stats.catUnmatched++;
+    }
+
     if (!dryRun) {
       const existing = await prisma.gymnast.findUnique({ where: { externalId } });
       if (existing) {
-        // Rattrapage : complète le sexe des gymnastes importés avant l'ajout du champ
-        if (existing.gender === null && gender !== null) {
-          await prisma.gymnast.update({ where: { externalId }, data: { gender } });
-          stats.genderBackfilled++;
+        // Rattrapage : complète sexe et catégorie des gymnastes déjà importés
+        const patch: { gender?: Gender; categoryId?: string } = {};
+        if (existing.gender === null && gender !== null) patch.gender = gender;
+        if (existing.categoryId === null && categoryId !== null) patch.categoryId = categoryId;
+        if (Object.keys(patch).length > 0) {
+          await prisma.gymnast.update({ where: { externalId }, data: patch });
+          if (patch.gender) stats.genderBackfilled++;
+          if (patch.categoryId) stats.catBackfilled++;
         }
         stats.existing++;
         continue;
       }
       await prisma.gymnast.create({
-        data: { externalId, firstName, lastName, birthYear, gender, clubId },
+        data: { externalId, firstName, lastName, birthYear, gender, clubId, categoryId },
       });
     }
     stats.gymnasts++;
@@ -263,35 +323,6 @@ async function main() {
     stats.moniteurs++;
   }
 
-  // 4. Catégories historiques (categorie_concours.csv) — importées inactives
-  if (categoriesPath) {
-    const baseOrder = dryRun ? 100 : await prisma.category.count();
-    let i = 0;
-    for (const r of parseCsv(categoriesPath)) {
-      const code = r["id_cat"];
-      const label = (r["categorie"] ?? "").trim();
-      if (!code || !label) {
-        stats.categoriesSkipped++;
-        continue;
-      }
-      const gender = genderFromConcours(r["id_concours"] ?? "");
-      const suffix =
-        gender === "F" ? " (filles)" : gender === "M" ? " (garçons)" : ` (${r["id_concours"]})`;
-      if (!dryRun) {
-        const existing = await prisma.category.findUnique({ where: { code } });
-        if (existing) {
-          stats.categoriesSkipped++;
-          continue;
-        }
-        await prisma.category.create({
-          data: { code, name: label + suffix, order: baseOrder + i, active: false },
-        });
-      }
-      stats.categories++;
-      i++;
-    }
-  }
-
   console.log(dryRun ? "── Simulation (aucune écriture) ──" : "── Import terminé ──");
   console.log(`Clubs                 : ${stats.clubs}${stats.clubsRenamed ? ` (noms réels appliqués : ${stats.clubsRenamed})` : ""}`);
   if (categoriesPath) {
@@ -301,6 +332,18 @@ async function main() {
   console.log(`  dont garçons : ${stats.genderM}, filles : ${stats.genderF}, indéterminé : ${stats.genderUnknown}`);
   if (stats.genderBackfilled > 0) {
     console.log(`  sexe complété sur gymnastes existants : ${stats.genderBackfilled}`);
+  }
+  console.log(`  catégorie attribuée : ${stats.catAssigned}, code inconnu : ${stats.catUnmatched}`);
+  if (stats.catBackfilled > 0) {
+    console.log(`  catégorie complétée sur gymnastes existants : ${stats.catBackfilled}`);
+  }
+  if (unmatchedCategoryCodes.size > 0) {
+    const top = [...unmatchedCategoryCodes.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([code, n]) => `${code}×${n}`)
+      .join(", ");
+    console.log(`  codes catégorie sans correspondance : ${top}`);
   }
   console.log(`Moniteurs importés    : ${stats.moniteurs} (lignes ignorées/doublons : ${stats.moniteursSkipped})`);
   if (stats.existing > 0) {
