@@ -205,7 +205,12 @@ export default async function MoniteurCompetitionPage({
             <h2 className="section-title mb-3">Inscrire un gymnaste</h2>
             <RegisterForm
               competitionId={competition.id}
-              gymnasts={notRegistered}
+              gymnasts={notRegistered.map((g) => ({
+                id: g.id,
+                firstName: g.firstName,
+                lastName: g.lastName,
+                categoryId: g.categoryId,
+              }))}
               categories={competition.categories.map((cc) => ({
                 id: cc.category.id,
                 code: cc.category.code,

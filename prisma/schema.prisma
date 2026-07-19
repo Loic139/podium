@@ -70,6 +70,11 @@ model Gymnast {
   birthYear Int?
   // Null si inconnu (anciennes données sans distinction)
   gender    Gender?
+
+  // Catégorie actuelle du gymnaste (proposée par défaut à l'inscription à une
+  // compétition). Null pour les données importées pas encore classées.
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
   // Identifiant externe pour synchronisation future avec une base existante
   externalId String? @unique
 
@@ -97,6 +102,7 @@ model Category {
 
   competitionCategories CompetitionCategory[]
   registrations         Registration[]
+  gymnasts              Gymnast[]
 }
 
 model Apparatus {

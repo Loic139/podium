@@ -121,6 +121,13 @@ async function main() {
     ["Maxime", "Ruchat", 2010, 1],
     ["Antoine", "Vulliamy", 2009, 2],
   ];
+  const catForGymnast = (birthYear: number) => {
+    if (birthYear >= 2014) return "C1";
+    if (birthYear >= 2013) return "C2";
+    if (birthYear >= 2011) return "C3";
+    return "C4";
+  };
+
   const gymnasts = [];
   for (const [firstName, lastName, birthYear, clubIdx] of gymnastData) {
     const clubId = clubs[clubIdx].id;
@@ -130,7 +137,14 @@ async function main() {
     gymnasts.push(
       existing ??
         (await prisma.gymnast.create({
-          data: { firstName, lastName, birthYear, gender: "M", clubId },
+          data: {
+            firstName,
+            lastName,
+            birthYear,
+            gender: "M",
+            clubId,
+            categoryId: categories[catForGymnast(birthYear)].id,
+          },
         }))
     );
   }
@@ -203,12 +217,6 @@ async function main() {
   await assign(judge3.id, ["VAULT", "HIGH_BAR"]);
 
   // ── Inscriptions ────────────────────────────────────
-  const catForGymnast = (birthYear: number) => {
-    if (birthYear >= 2014) return "C1";
-    if (birthYear >= 2013) return "C2";
-    if (birthYear >= 2011) return "C3";
-    return "C4";
-  };
   const monitorByClub: Record<string, string> = {
     [clubs[0].id]: monitor1.id,
     [clubs[1].id]: monitor2.id,

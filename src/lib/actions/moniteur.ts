@@ -1,28 +1,53 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { isValidYoutubeUrl } from "@/lib/youtube";
+import type { Gender } from "@prisma/client";
 
 export type ActionState = { error?: string; success?: string };
 
 // ─── Gymnastes ───────────────────────────────────────
 
-export async function createGymnast(formData: FormData) {
-  const session = await requireRole("MONITEUR");
-  if (!session.clubId) return;
+/** Extrait et valide les champs communs des formulaires gymnaste. */
+function gymnastFields(formData: FormData) {
   const firstName = String(formData.get("firstName") ?? "").trim();
   const lastName = String(formData.get("lastName") ?? "").trim();
   const birthYear = parseInt(String(formData.get("birthYear"))) || null;
   const genderRaw = String(formData.get("gender") ?? "");
-  const gender = genderRaw === "M" || genderRaw === "F" ? genderRaw : null;
-  if (!firstName || !lastName) return;
+  const gender: Gender | null =
+    genderRaw === "M" || genderRaw === "F" ? genderRaw : null;
+  const categoryId = String(formData.get("categoryId") ?? "") || null;
+  return { firstName, lastName, birthYear, gender, categoryId };
+}
+
+export async function createGymnast(formData: FormData) {
+  const session = await requireRole("MONITEUR");
+  if (!session.clubId) return;
+  const fields = gymnastFields(formData);
+  if (!fields.firstName || !fields.lastName || !fields.categoryId) return;
 
   await prisma.gymnast.create({
-    data: { firstName, lastName, birthYear, gender, clubId: session.clubId },
+    data: { ...fields, clubId: session.clubId },
   });
   revalidatePath("/moniteur/gymnastes");
+}
+
+export async function updateGymnast(formData: FormData) {
+  const session = await requireRole("MONITEUR");
+  const id = String(formData.get("id"));
+  const gymnast = await prisma.gymnast.findUnique({ where: { id } });
+  // Un moniteur ne modifie que les gymnastes de son club
+  if (!gymnast || gymnast.clubId !== session.clubId) return;
+
+  const fields = gymnastFields(formData);
+  if (!fields.firstName || !fields.lastName || !fields.categoryId) return;
+
+  await prisma.gymnast.update({ where: { id }, data: fields });
+  revalidatePath("/moniteur/gymnastes");
+  redirect("/moniteur/gymnastes");
 }
 
 // ─── Inscription à une compétition ───────────────────

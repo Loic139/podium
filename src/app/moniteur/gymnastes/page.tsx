@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { createGymnast } from "@/lib/actions/moniteur";
@@ -6,11 +7,14 @@ export default async function GymnastsPage() {
   const session = await requireRole("MONITEUR");
   if (!session.clubId) return null;
 
-  const gymnasts = await prisma.gymnast.findMany({
-    where: { clubId: session.clubId },
-    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-    include: { _count: { select: { registrations: true } } },
-  });
+  const [gymnasts, categories] = await Promise.all([
+    prisma.gymnast.findMany({
+      where: { clubId: session.clubId },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      include: { category: true, _count: { select: { registrations: true } } },
+    }),
+    prisma.category.findMany({ where: { active: true }, orderBy: { order: "asc" } }),
+  ]);
 
   return (
     <div>
@@ -24,7 +28,9 @@ export default async function GymnastsPage() {
                 <th>Prénom</th>
                 <th>Sexe</th>
                 <th>Année</th>
+                <th>Catégorie</th>
                 <th className="text-right">Participations</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -42,12 +48,27 @@ export default async function GymnastsPage() {
                     )}
                   </td>
                   <td className="text-slate-500">{g.birthYear ?? "—"}</td>
+                  <td>
+                    {g.category ? (
+                      <span className="badge-gray">{g.category.code}</span>
+                    ) : (
+                      <span className="badge-amber">À classer</span>
+                    )}
+                  </td>
                   <td className="text-right">{g._count.registrations}</td>
+                  <td className="text-right">
+                    <Link
+                      href={`/moniteur/gymnastes/${g.id}`}
+                      className="btn-secondary btn-sm"
+                    >
+                      Modifier
+                    </Link>
+                  </td>
                 </tr>
               ))}
               {gymnasts.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-slate-400 py-6">
+                  <td colSpan={7} className="text-center text-slate-400 py-6">
                     Aucun gymnaste. Ajoutez-en un ci-contre.
                   </td>
                 </tr>
@@ -77,6 +98,15 @@ export default async function GymnastsPage() {
             <div>
               <label className="label">Année de naissance</label>
               <input name="birthYear" type="number" min={1950} max={2030} className="input" />
+            </div>
+            <div>
+              <label className="label">Catégorie</label>
+              <select name="categoryId" className="input" required defaultValue="">
+                <option value="" disabled>Choisir…</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                ))}
+              </select>
             </div>
             <button className="btn-primary w-full">Ajouter</button>
           </form>
