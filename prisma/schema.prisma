@@ -141,6 +141,9 @@ model Competition {
   year        Int
   description String?           @db.Text
   status      CompetitionStatus @default(DRAFT)
+  // Concours filles (F), garçons (M) ou mixte (null).
+  // Si défini, seuls les gymnastes de ce sexe peuvent être inscrits.
+  gender      Gender?
 
   scoringMethod ScoringMethod @default(AVERAGE)
   // Nombre de juges prévus par engin (indicatif, la config réelle = assignations)

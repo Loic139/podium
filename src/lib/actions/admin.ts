@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
-import type { Role, ScoringMethod, CompetitionStatus } from "@prisma/client";
+import type { Role, ScoringMethod, CompetitionStatus, Gender } from "@prisma/client";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -177,6 +177,9 @@ export async function createCompetition(formData: FormData) {
   const description = String(formData.get("description") ?? "").trim() || null;
   const scoringMethod = String(formData.get("scoringMethod")) as ScoringMethod;
   const judgesPerApparatus = parseInt(String(formData.get("judgesPerApparatus"))) || 1;
+  const genderRaw = String(formData.get("gender") ?? "");
+  const gender: Gender | null =
+    genderRaw === "M" || genderRaw === "F" ? genderRaw : null;
 
   const categoryIds = formData.getAll("categoryIds").map(String);
   const apparatusIds = formData.getAll("apparatusIds").map(String);
@@ -200,6 +203,7 @@ export async function createCompetition(formData: FormData) {
       description,
       scoringMethod,
       judgesPerApparatus,
+      gender,
       status: "DRAFT",
       categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
     },

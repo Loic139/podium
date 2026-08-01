@@ -42,9 +42,20 @@ export default async function MoniteurCompetitionPage({
   const gymnasts = await prisma.gymnast.findMany({
     where: { clubId: session.clubId },
     orderBy: { lastName: "asc" },
+    include: { category: true },
   });
   const notRegistered = gymnasts.filter(
     (g) => !competition.registrations.some((r) => r.gymnastId === g.id)
+  );
+  // Éligibles : sexe du concours respecté ET catégorie au programme
+  const competitionCategoryIds = new Set(
+    competition.categories.map((cc) => cc.categoryId)
+  );
+  const eligible = notRegistered.filter(
+    (g) =>
+      (!competition.gender || g.gender === competition.gender) &&
+      g.categoryId !== null &&
+      competitionCategoryIds.has(g.categoryId)
   );
 
   const now = new Date();
@@ -55,7 +66,11 @@ export default async function MoniteurCompetitionPage({
         <Link href="/moniteur/competitions" className="text-sm text-indigo-600 hover:underline">
           ← Compétitions
         </Link>
-        <h1 className="page-title mt-1">{competition.name}</h1>
+        <div className="flex items-center gap-3 mt-1">
+          <h1 className="page-title">{competition.name}</h1>
+          {competition.gender === "M" && <span className="badge-blue">Garçons</span>}
+          {competition.gender === "F" && <span className="badge-indigo">Filles</span>}
+        </div>
         <p className="text-sm text-slate-500 mt-1">
           Résultats publics :{" "}
           <Link href={`/competitions/${competition.id}`} className="text-indigo-600 hover:underline">
@@ -205,17 +220,13 @@ export default async function MoniteurCompetitionPage({
             <h2 className="section-title mb-3">Inscrire un gymnaste</h2>
             <RegisterForm
               competitionId={competition.id}
-              gymnasts={notRegistered.map((g) => ({
+              gymnasts={eligible.map((g) => ({
                 id: g.id,
                 firstName: g.firstName,
                 lastName: g.lastName,
-                categoryId: g.categoryId,
+                categoryCode: g.category?.code ?? "?",
               }))}
-              categories={competition.categories.map((cc) => ({
-                id: cc.category.id,
-                code: cc.category.code,
-                name: cc.category.name,
-              }))}
+              ineligibleCount={notRegistered.length - eligible.length}
             />
             <p className="text-xs text-slate-400 mt-3">
               Gymnaste absent de la liste ?{" "}

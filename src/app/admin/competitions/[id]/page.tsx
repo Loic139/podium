@@ -74,6 +74,12 @@ export default async function AdminCompetitionPage({
           <h1 className="page-title mt-1">{competition.name}</h1>
           <p className="text-sm text-slate-500 mt-1">
             {competition.year} · {statusLabel[competition.status]} ·{" "}
+            {competition.gender === "M"
+              ? "Concours garçons"
+              : competition.gender === "F"
+                ? "Concours filles"
+                : "Concours mixte"}{" "}
+            ·{" "}
             {competition.scoringMethod === "AVERAGE"
               ? "Moyenne des notes"
               : "Moyenne tronquée (sans min/max)"}{" "}

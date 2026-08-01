@@ -110,7 +110,11 @@ export default async function CompetitionResultsPage({
         <Link href="/competitions" className="text-sm text-indigo-600 hover:underline">
           ← Toutes les compétitions
         </Link>
-        <h1 className="page-title mt-1">{competition.name}</h1>
+        <div className="flex items-center gap-3 mt-1">
+          <h1 className="page-title">{competition.name}</h1>
+          {competition.gender === "M" && <span className="badge-blue">Garçons</span>}
+          {competition.gender === "F" && <span className="badge-indigo">Filles</span>}
+        </div>
         <p className="text-sm text-slate-500 mt-1">
           {competition.status === "ACTIVE" ? (
             <>

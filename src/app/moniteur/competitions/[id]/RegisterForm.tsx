@@ -7,88 +7,71 @@ type GymnastOption = {
   id: string;
   firstName: string;
   lastName: string;
-  /** Catégorie actuelle du gymnaste — présélectionnée si offerte ici */
-  categoryId: string | null;
+  categoryCode: string;
 };
 
 export default function RegisterForm({
   competitionId,
   gymnasts,
-  categories,
+  ineligibleCount,
 }: {
   competitionId: string;
+  /** Uniquement les gymnastes éligibles (sexe + catégorie du concours) */
   gymnasts: GymnastOption[];
-  categories: { id: string; code: string; name: string }[];
+  ineligibleCount: number;
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(
     registerGymnast,
     {}
   );
-
-  const defaultCategoryFor = (gymnastId: string) => {
-    const g = gymnasts.find((x) => x.id === gymnastId);
-    return g?.categoryId && categories.some((c) => c.id === g.categoryId)
-      ? g.categoryId
-      : categories[0]?.id ?? "";
-  };
-
   const [gymnastId, setGymnastId] = useState(gymnasts[0]?.id ?? "");
-  const [categoryId, setCategoryId] = useState(
-    gymnasts[0] ? defaultCategoryFor(gymnasts[0].id) : ""
-  );
-
-  if (gymnasts.length === 0) {
-    return (
-      <p className="text-sm text-slate-400">
-        Tous vos gymnastes sont déjà inscrits.
-      </p>
-    );
-  }
+  const selected = gymnasts.find((g) => g.id === gymnastId);
 
   return (
-    <form action={action} className="space-y-3">
-      <input type="hidden" name="competitionId" value={competitionId} />
-      <div>
-        <label className="label">Gymnaste</label>
-        <select
-          name="gymnastId"
-          className="input"
-          required
-          value={gymnastId}
-          onChange={(e) => {
-            setGymnastId(e.target.value);
-            setCategoryId(defaultCategoryFor(e.target.value));
-          }}
-        >
-          {gymnasts.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.lastName} {g.firstName}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="label">Catégorie pour cette compétition</label>
-        <select
-          name="categoryId"
-          className="input"
-          required
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-        >
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
-          ))}
-        </select>
-        <p className="text-xs text-slate-400 mt-1">
-          Présélectionnée d’après la catégorie du gymnaste.
+    <div className="space-y-3">
+      {gymnasts.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          Aucun gymnaste éligible à inscrire.
         </p>
-      </div>
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}
-      <button disabled={pending} className="btn-primary w-full">
-        {pending ? "Inscription…" : "Inscrire"}
-      </button>
-    </form>
+      ) : (
+        <form action={action} className="space-y-3">
+          <input type="hidden" name="competitionId" value={competitionId} />
+          <div>
+            <label className="label">Gymnaste</label>
+            <select
+              name="gymnastId"
+              className="input"
+              required
+              value={gymnastId}
+              onChange={(e) => setGymnastId(e.target.value)}
+            >
+              {gymnasts.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.lastName} {g.firstName} — {g.categoryCode}
+                </option>
+              ))}
+            </select>
+            {selected && (
+              <p className="text-xs text-slate-400 mt-1">
+                Sera inscrit·e en catégorie <strong>{selected.categoryCode}</strong>{" "}
+                (sa catégorie actuelle).
+              </p>
+            )}
+          </div>
+          {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+          {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}
+          <button disabled={pending} className="btn-primary w-full">
+            {pending ? "Inscription…" : "Inscrire"}
+          </button>
+        </form>
+      )}
+      {ineligibleCount > 0 && (
+        <p className="text-xs text-amber-600">
+          {ineligibleCount} gymnaste{ineligibleCount > 1 ? "s" : ""} de votre club{" "}
+          {ineligibleCount > 1 ? "ne sont pas éligibles" : "n’est pas éligible"} à ce
+          concours (sexe ou catégorie hors programme, ou non classé).
+        </p>
+      )}
+    </div>
   );
 }

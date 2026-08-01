@@ -27,6 +27,15 @@ export default async function NewCompetitionPage() {
             <label className="label">Description</label>
             <textarea name="description" rows={2} className="input" />
           </div>
+          <div>
+            <label className="label">Concours</label>
+            <select name="gender" className="input" required defaultValue="">
+              <option value="" disabled>Choisir…</option>
+              <option value="M">Garçons</option>
+              <option value="F">Filles</option>
+              <option value="MIXTE">Mixte (sans restriction)</option>
+            </select>
+          </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Mode de calcul des notes</label>

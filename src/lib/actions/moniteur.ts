@@ -59,7 +59,6 @@ export async function registerGymnast(
   const session = await requireRole("MONITEUR");
   const competitionId = String(formData.get("competitionId"));
   const gymnastId = String(formData.get("gymnastId"));
-  const categoryId = String(formData.get("categoryId"));
 
   // Le gymnaste doit appartenir au club du moniteur
   const gymnast = await prisma.gymnast.findUnique({ where: { id: gymnastId } });
@@ -67,11 +66,34 @@ export async function registerGymnast(
     return { error: "Gymnaste introuvable dans votre club." };
   }
 
-  // La catégorie doit être ouverte dans cette compétition
-  const cc = await prisma.competitionCategory.findUnique({
-    where: { competitionId_categoryId: { competitionId, categoryId } },
+  const competition = await prisma.competition.findUnique({
+    where: { id: competitionId },
   });
-  if (!cc) return { error: "Catégorie non disponible pour cette compétition." };
+  if (!competition) return { error: "Compétition introuvable." };
+
+  // Sexe du concours : un concours filles/garçons n'accepte que ce sexe
+  if (competition.gender && gymnast.gender !== competition.gender) {
+    return {
+      error:
+        competition.gender === "F"
+          ? "Concours filles : ce gymnaste ne peut pas être inscrit."
+          : "Concours garçons : cette gymnaste ne peut pas être inscrite.",
+    };
+  }
+
+  // L'inscription se fait dans la catégorie du gymnaste, qui doit être
+  // ouverte dans cette compétition
+  if (!gymnast.categoryId) {
+    return { error: "Ce gymnaste n'a pas de catégorie — classez-le d'abord (page Gymnastes)." };
+  }
+  const cc = await prisma.competitionCategory.findUnique({
+    where: {
+      competitionId_categoryId: { competitionId, categoryId: gymnast.categoryId },
+    },
+  });
+  if (!cc) {
+    return { error: "La catégorie de ce gymnaste n'est pas au programme de cette compétition." };
+  }
 
   // Un gymnaste ne participe qu'une fois à une même compétition
   const existing = await prisma.registration.findUnique({
@@ -83,7 +105,7 @@ export async function registerGymnast(
     data: {
       competitionId,
       gymnastId,
-      categoryId,
+      categoryId: gymnast.categoryId,
       competitionCategoryId: cc.id,
       createdById: session.id,
     },

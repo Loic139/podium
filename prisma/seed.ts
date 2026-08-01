@@ -162,6 +162,7 @@ async function main() {
       description:
         "Compétition de gymnastique vidéo — 5 semaines, un engin par semaine.",
       status: "ACTIVE",
+      gender: "M",
       scoringMethod: "AVERAGE",
       judgesPerApparatus: 2,
       categories: {
